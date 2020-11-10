@@ -3,9 +3,6 @@ import REPL
 using Dates
 using WebDriver
 using YAML
-# using Gumbo
-# using Cascadia
-
 
 function init_session(s :: Session)
   navigate!(s, "https://kistenlotto.cocacola.de")
@@ -17,10 +14,117 @@ function init_session(s :: Session)
   catch e
     @info "Cookies already accepted"
   end
-
 end
 
-function register(s :: Session, s2 :: Session, cfg, i)
+function loggedin(s :: Session)
+  navigate!(s, "https://kistenlotto.cocacola.de")
+  # login btn
+  login_btn = Element(s, "xpath", """//*[@id="app"]/div/div/div[1]/div[4]/div[1]""")
+  # check whether login btn has class "hidden" <=> loggedin
+  if match(r"hidden", element_attr(login_btn, "class")) != nothing
+    return true
+  else
+    return false
+  end
+end
+
+function logout(s::Session)
+  refresh!(s)
+  navigate!(s, "https://kistenlotto.cocacola.de")
+  if loggedin(s)
+    click!(Element(s, "xpath", """//*[@id="app"]/div/div/div[1]/div[4]/div[2]"""))
+  end
+end
+
+function login(s :: Session, user :: String, pw::String)
+  navigate!(s, "https://kistenlotto.cocacola.de")
+  # click account btn
+  click!(Element(s, "xpath", """//*[@id="app"]/div/div/div[1]/div[4]/div[1]/button"""))
+  # input credentials
+  element_keys!(Element(s, "xpath", """//*[@id="signInEmailAddress"]"""), user)
+  element_keys!(Element(s, "xpath", """//*[@id="currentPassword"]"""), pw)
+  # click signin btn
+  click!(Element(s, "xpath", """//*[@id="ces-form-submit-ces-sign-in-form"]"""))
+
+  # accept tos if not already done
+  sleep(2)
+  try
+    click!(Element(s, "xpath", """//*[@id="app"]/div/div[2]/div[2]/div[2]/div[2]/div[3]/button"""))
+    @info "TOS accepted"
+  catch e
+    @info "TOS already accepted"
+  end
+end
+
+function apply(s :: Session)
+  # skip image upload and directly goto mix page 😎
+  navigate!(s, "https://kistenlotto.cocacola.de")
+
+  if !loggedin(s)
+    throw(ErrorException("Not logged in"))
+  end
+
+  # click apply btn
+  click!(Element(s, "xpath", """//*[@id="app"]/div/div/main/div/div/div/div[2]/div/button"""))
+
+  # # check if already 3x applied this week from THU:0:00--SUN:23:59
+  # sleep(2)
+  # msg = element_text(Element(s, "css selector", """#app > div > div.modal.modal-no-remaining-tries > div.modal-content > div.modal-no-remaining-tries"""))
+  # # print(msg)
+  # sleep(2)
+  # if match(r"schon dreimal mitgemacht", msg) != nothing
+  # # if true
+  #   @info "Already 3x applied"
+  #   return
+  # end
+
+  # upload cola kiste image not already 3x applied
+  sleep(4)
+  try
+    fileupload_btn = Element(s, "xpath", """//*[@id="img-file"]""")
+    element_keys!(fileupload_btn, joinpath(pwd(), cfg["colabox_image"]))
+  catch e
+    @info "Already 3x applied"
+    return nothing
+  end
+
+  # click confirm btn
+  sleep(2)
+  click!(Element(s, "xpath", """//*[@id="app"]/div/div/main/div/div/div/div/div/div/div/div[3]/div[2]/button"""))
+
+  # wait for analysis
+  analysis_done = false
+  for i=1:15
+    msg = element_text(Element(s, "xpath", """//*[@id="app"]/div/div/main/div/div/div/div/div/div"""))
+    if match(r"UND JETZT GUT MISCHEN!", msg) != nothing
+      analysis_done = true
+      break
+    else
+      sleep(2)
+      @info "wait for analysis"
+    end
+  end
+  if analysis_done == false
+    throw(ErrorException("Analysis erro"))
+  end
+
+  # click submit btn
+  sleep(2)
+  click!(Element(s, "xpath", """//*[@id="app"]/div/div/main/div/div/div/div/div/div/div[3]/div[1]/button"""))
+  # click random retailer
+  sleep(2)
+  click!(Element(s, "xpath", """//*[@id="app"]/div/div/main/div/div/div/div[1]/div/div[1]"""))
+  # click submit btn
+  click!(Element(s, "xpath", """//*[@id="app"]/div/div/main/div/div/div/div[2]/div/button"""))
+
+  sleep(2)
+  msg = element_text(Element(s, "xpath", """//*[@id="app"]/div/div[2]/div[2]/div[2]/div"""))
+  if match(r"Wir haben dir deinen Kistenlottoschein per E-Mail zugeschickt.", msg) == nothing
+    throw(ErrorException("Something went wrong"))
+  end
+end
+
+  function register(s :: Session, s2 :: Session, cfg, i)
   navigate!(s, "https://kistenlotto.cocacola.de")
   sleep(2)
   email = string(cfg["gmail_id"], "+A$(lpad(i, 6, "0"))@gmail.com")
@@ -95,6 +199,7 @@ function handle2Captcha(s, s2, cfg)
 end
 
 rwd = RemoteWebDriver(Capabilities("chrome"), host = "127.0.0.1", port = 4444)
+timeouts!(s, Timeouts(script = 50_000, pageLoad = 100_000, implicit = 5))
 sleep(1)
 s = Session(rwd)
 s2 = Session(rwd)
