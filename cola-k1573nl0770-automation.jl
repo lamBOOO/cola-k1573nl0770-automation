@@ -29,15 +29,24 @@ function loggedin(s :: Session)
 end
 
 function logout(s::Session)
-  refresh!(s)
-  navigate!(s, "https://kistenlotto.cocacola.de")
-  if loggedin(s)
-    click!(Element(s, "xpath", """//*[@id="app"]/div/div/div[1]/div[4]/div[2]"""))
+  delete!(s, "") # delete cookies
+  script!(s, "localStorage.clear();")
+  try
+    click!(Element(s, "xpath", """//*[@id="app"]/div/div/div[1]/div[4]/div[2]/button"""))
+  catch e
   end
+  init_session(s)
 end
 
 function login(s :: Session, user :: String, pw::String)
   navigate!(s, "https://kistenlotto.cocacola.de")
+  # try to click logout btn
+  try
+    click!(Element(s, "xpath", """//*[@id="app"]/div/div/div[1]/div[4]/div[2]"""))
+
+  catch e
+    @info "Pressed logout btn"
+  end
   # click account btn
   click!(Element(s, "xpath", """//*[@id="app"]/div/div/div[1]/div[4]/div[1]/button"""))
   # input credentials
@@ -56,75 +65,53 @@ function login(s :: Session, user :: String, pw::String)
   end
 end
 
-function apply(s :: Session)
-  # skip image upload and directly goto mix page 😎
-  navigate!(s, "https://kistenlotto.cocacola.de")
-
-  if !loggedin(s)
-    throw(ErrorException("Not logged in"))
-  end
-
-  # click apply btn
-  click!(Element(s, "xpath", """//*[@id="app"]/div/div/main/div/div/div/div[2]/div/button"""))
-
-  # # check if already 3x applied this week from THU:0:00--SUN:23:59
-  # sleep(2)
-  # msg = element_text(Element(s, "css selector", """#app > div > div.modal.modal-no-remaining-tries > div.modal-content > div.modal-no-remaining-tries"""))
-  # # print(msg)
-  # sleep(2)
-  # if match(r"schon dreimal mitgemacht", msg) != nothing
-  # # if true
-  #   @info "Already 3x applied"
-  #   return
-  # end
-
-  # upload cola kiste image not already 3x applied
-  sleep(4)
-  try
-    fileupload_btn = Element(s, "xpath", """//*[@id="img-file"]""")
-    element_keys!(fileupload_btn, joinpath(pwd(), cfg["colabox_image"]))
-  catch e
-    @info "Already 3x applied"
-    return nothing
-  end
-
-  # click confirm btn
-  sleep(2)
-  click!(Element(s, "xpath", """//*[@id="app"]/div/div/main/div/div/div/div/div/div/div/div[3]/div[2]/button"""))
-
-  # wait for analysis
-  analysis_done = false
-  for i=1:15
-    msg = element_text(Element(s, "xpath", """//*[@id="app"]/div/div/main/div/div/div/div/div/div"""))
-    if match(r"UND JETZT GUT MISCHEN!", msg) != nothing
-      analysis_done = true
-      break
-    else
-      sleep(2)
-      @info "wait for analysis"
-    end
-  end
-  if analysis_done == false
-    throw(ErrorException("Analysis erro"))
-  end
-
-  # click submit btn
-  sleep(2)
-  click!(Element(s, "xpath", """//*[@id="app"]/div/div/main/div/div/div/div/div/div/div[3]/div[1]/button"""))
-  # click random retailer
-  sleep(2)
-  click!(Element(s, "xpath", """//*[@id="app"]/div/div/main/div/div/div/div[1]/div/div[1]"""))
-  # click submit btn
-  click!(Element(s, "xpath", """//*[@id="app"]/div/div/main/div/div/div/div[2]/div/button"""))
-
-  sleep(2)
-  msg = element_text(Element(s, "xpath", """//*[@id="app"]/div/div[2]/div[2]/div[2]/div"""))
-  if match(r"Wir haben dir deinen Kistenlottoschein per E-Mail zugeschickt.", msg) == nothing
-    throw(ErrorException("Something went wrong"))
-  end
+function tos_accepted(s)
 end
 
-  function register(s :: Session, s2 :: Session, cfg, i)
+function getuuid(s)
+  ls = collect(keys(script!(s, "return localStorage")))
+  ls_names = map(x->string(x), ls)
+  ls_uuids = filter(x->x!=nothing, match.(r"terms_(.*)", ls_names))
+  @assert length(ls_uuids) == 1
+  uuid = ls_uuids[1].captures[1]
+  return uuid
+end
+
+function remainding_tries(s::Session)
+  uuid = getuuid(s)
+  cmd = Cmd(["curl", "https://kistenlotto.cocacola.de/api/v1/users/remaining-tries", "-H", "content-type: application/json;charset=UTF-8", "--data-binary", "{\"uuid\":\"$uuid\"}"])
+  response = JSON.parse(read(cmd, String))
+  return response["data"]["remaining_tries"]
+end
+
+"""
+After login, there should be an uuid in the local storage => get it.
+"""
+function apply_new(s::Session)
+  # skip the clicking part and directly use API 🤯
+  uuid = getuuid(s)
+
+  options = ["coke_red", "coke_zero", "coke_zero_coffeine", "coke_vanilla", "coke_cherry", "coke_light", "coke_light_no_coffeine", "coke_light_lemon", "fanta", "fanta_light", "fanta_red", "fanta_green", "fanta_lemon", "mezzomix", "mezzomix_zero", "sprite", "sprite_zero", "lift"]
+
+  tries = remainding_tries(s)
+  @info "Try to apply $tries times"
+
+  for i=1:tries
+    @info "Apply $i"
+    rdm_crate = [rand(options) for i=1:12]
+    @info "Use crate: $rdm_crate"
+
+    cmd = Cmd(["curl", "https://kistenlotto.cocacola.de/api/v1/users/submit-crate", "-H", "content-type: application/json;charset=UTF-8", "--data-binary", "{\"retailer\":\"rewe\",\"uuid\":\"$uuid\",\"crate\":$rdm_crate}"])
+
+    response = JSON.parse(read(cmd, String))
+    print(response)
+  end
+
+  @assert remainding_tries(s) == 0
+
+end
+
+function register(s :: Session, s2 :: Session, cfg, i)
   navigate!(s, "https://kistenlotto.cocacola.de")
   sleep(2)
   email = string(cfg["gmail_id"], "+A$(lpad(i, 6, "0"))@gmail.com")
