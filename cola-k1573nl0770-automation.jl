@@ -43,7 +43,6 @@ function login(s :: Session, user :: String, pw::String)
   # try to click logout btn
   try
     click!(Element(s, "xpath", """//*[@id="app"]/div/div/div[1]/div[4]/div[2]"""))
-
   catch e
     @info "Pressed logout btn"
   end
@@ -63,9 +62,6 @@ function login(s :: Session, user :: String, pw::String)
   catch e
     @info "TOS already accepted"
   end
-end
-
-function tos_accepted(s)
 end
 
 function getuuid(s)
@@ -90,25 +86,18 @@ After login, there should be an uuid in the local storage => get it.
 function apply_new(s::Session)
   # skip the clicking part and directly use API 🤯
   uuid = getuuid(s)
-
   options = ["coke_red", "coke_zero", "coke_zero_coffeine", "coke_vanilla", "coke_cherry", "coke_light", "coke_light_no_coffeine", "coke_light_lemon", "fanta", "fanta_light", "fanta_red", "fanta_green", "fanta_lemon", "mezzomix", "mezzomix_zero", "sprite", "sprite_zero", "lift"]
-
   tries = remainding_tries(s)
   @info "Try to apply $tries times"
-
   for i=1:tries
     @info "Apply $i"
     rdm_crate = [rand(options) for i=1:12]
     @info "Use crate: $rdm_crate"
-
     cmd = Cmd(["curl", "https://kistenlotto.cocacola.de/api/v1/users/submit-crate", "-H", "content-type: application/json;charset=UTF-8", "--data-binary", "{\"retailer\":\"rewe\",\"uuid\":\"$uuid\",\"crate\":$rdm_crate}"])
-
     response = JSON.parse(read(cmd, String))
     print(response)
   end
-
   @assert remainding_tries(s) == 0
-
 end
 
 function register(s :: Session, s2 :: Session, cfg, i)
@@ -182,7 +171,6 @@ function handle2Captcha(s, s2, cfg)
   # process initial page
   script!(s, string("document.getElementById(\"g-recaptcha-response\").innerHTML=\"", cap_response, "\";"))
   script!(s, "onCaptchaSubmit()")
-
 end
 
 rwd = RemoteWebDriver(Capabilities("chrome"), host = "127.0.0.1", port = 4444)
@@ -191,4 +179,3 @@ sleep(1)
 s = Session(rwd)
 s2 = Session(rwd)
 cfg = YAML.load_file("config.yml")
-
