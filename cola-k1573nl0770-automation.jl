@@ -31,21 +31,14 @@ end
 function logout(s::Session)
   delete!(s, "") # delete cookies
   script!(s, "localStorage.clear();")
-  try
-    click!(Element(s, "xpath", """//*[@id="app"]/div/div/div[1]/div[4]/div[2]/button"""))
-  catch e
-  end
+  script!(s, "sessionStorage.removeItem('cds-current-user-uuid');")
   init_session(s)
 end
 
-function login(s :: Session, user :: String, pw::String)
+function login(s :: Session, i :: Int)
+  user = email = string(cfg["gmail_id"], "+A$(lpad(i, 6, "0"))@gmail.com")
+  pw = cfg["pw"]
   navigate!(s, "https://kistenlotto.cocacola.de")
-  # try to click logout btn
-  try
-    click!(Element(s, "xpath", """//*[@id="app"]/div/div/div[1]/div[4]/div[2]"""))
-  catch e
-    @info "Pressed logout btn"
-  end
   # click account btn
   click!(Element(s, "xpath", """//*[@id="app"]/div/div/div[1]/div[4]/div[1]/button"""))
   # input credentials
@@ -62,6 +55,12 @@ function login(s :: Session, user :: String, pw::String)
   catch e
     @info "TOS already accepted"
   end
+
+  try
+    getuuid(s)
+  catch e
+    Throw(ErrorException("Login failed"))
+  end
 end
 
 function getuuid(s)
@@ -76,14 +75,14 @@ end
 function remainding_tries(s::Session)
   uuid = getuuid(s)
   cmd = Cmd(["curl", "https://kistenlotto.cocacola.de/api/v1/users/remaining-tries", "-H", "content-type: application/json;charset=UTF-8", "--data-binary", "{\"uuid\":\"$uuid\"}"])
-  response = JSON.parse(read(cmd, String))
+  response = JSON.parse(read(pipeline(cmd, stderr=Base.DevNull()), String))
   return response["data"]["remaining_tries"]
 end
 
 """
 After login, there should be an uuid in the local storage => get it.
 """
-function apply_new(s::Session)
+function apply(s::Session)
   # skip the clicking part and directly use API 🤯
   uuid = getuuid(s)
   options = ["coke_red", "coke_zero", "coke_zero_coffeine", "coke_vanilla", "coke_cherry", "coke_light", "coke_light_no_coffeine", "coke_light_lemon", "fanta", "fanta_light", "fanta_red", "fanta_green", "fanta_lemon", "mezzomix", "mezzomix_zero", "sprite", "sprite_zero", "lift"]
@@ -94,8 +93,8 @@ function apply_new(s::Session)
     rdm_crate = [rand(options) for i=1:12]
     @info "Use crate: $rdm_crate"
     cmd = Cmd(["curl", "https://kistenlotto.cocacola.de/api/v1/users/submit-crate", "-H", "content-type: application/json;charset=UTF-8", "--data-binary", "{\"retailer\":\"rewe\",\"uuid\":\"$uuid\",\"crate\":$rdm_crate}"])
-    response = JSON.parse(read(cmd, String))
-    print(response)
+    response = JSON.parse(read(pipeline(cmd, stderr=Base.DevNull()), String))
+    @info "Response: $response"
   end
   @assert remainding_tries(s) == 0
 end
@@ -108,6 +107,7 @@ function register(s :: Session, s2 :: Session, cfg, i)
   # click account btn
   click!(Element(s, "xpath", """//*[@id="app"]/div/div/div[1]/div[4]/div[1]/button"""))
   # click new account btn
+  sleep(2)
   click!(Element(s, "xpath", """//*[@id="app"]/div/div[2]/div[2]/div[2]/div[2]/div/div/div[6]/button/div"""))
   # enter details
   element_keys!(Element(s, "xpath", """//*[@id="firstName"]"""), cfg["firstname"])
@@ -127,15 +127,6 @@ function register(s :: Session, s2 :: Session, cfg, i)
   handle2Captcha(s, s2, cfg)
   # click submit_button
   click!(Element(s, "xpath", """//*[@id="ces-form-submit-ces-register-form"]"""))
-
-  try
-    success_el = Element(s, "xpath", """//*[@id="app"]/div/div[2]/div[2]/div[2]/div[2]/div/div""")
-    match(r"", element_text(success_el)).match
-    @info "Register: Done"
-  catch e
-    @info "Register: Fail"
-  end
-
 end
 
 function handle2Captcha(s, s2, cfg)
@@ -159,7 +150,7 @@ function handle2Captcha(s, s2, cfg)
     @debug answer
     if answer=="CAPCHA_NOT_READY"
       @info "Captcha wait"
-      sleep(20)
+      sleep(10)
     else
       @info "Captcha done"
       cap_response = match(r"OK\|(.*)", answer).captures[1]
@@ -171,6 +162,14 @@ function handle2Captcha(s, s2, cfg)
   # process initial page
   script!(s, string("document.getElementById(\"g-recaptcha-response\").innerHTML=\"", cap_response, "\";"))
   script!(s, "onCaptchaSubmit()")
+end
+
+function register_all(s, s2, cfg)
+  for i=cfg["gmail_start"]:cfg["gmail_end"]
+    logout(s)
+    @info "Register $i"
+    register(s, s2, cfg, i)
+  end
 end
 
 rwd = RemoteWebDriver(Capabilities("chrome"), host = "127.0.0.1", port = 4444)
