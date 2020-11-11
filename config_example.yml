@@ -10,6 +10,4 @@ pw: "password123"
 street: "Straße 1"
 zipcode: "56789"
 city: "Berlin"
-apply_wait: 5
 2captcha_userkey: 65586210a12683de139c1b2hstz34904
-colabox_image: image.jpg

@@ -1,8 +1,6 @@
-using REPL.TerminalMenus
-import REPL
-using Dates
 using WebDriver
 using YAML
+using JSON
 
 function init_session(s :: Session)
   navigate!(s, "https://kistenlotto.cocacola.de")
@@ -36,11 +34,16 @@ function logout(s::Session)
 end
 
 function login(s :: Session, i :: Int)
+  if loggedin(s)
+    @info "Logout first"
+    logout(s)
+  end
   user = email = string(cfg["gmail_id"], "+A$(lpad(i, 6, "0"))@gmail.com")
   pw = cfg["pw"]
   navigate!(s, "https://kistenlotto.cocacola.de")
   # click account btn
   click!(Element(s, "xpath", """//*[@id="app"]/div/div/div[1]/div[4]/div[1]/button"""))
+  sleep(2)
   # input credentials
   element_keys!(Element(s, "xpath", """//*[@id="signInEmailAddress"]"""), user)
   element_keys!(Element(s, "xpath", """//*[@id="currentPassword"]"""), pw)
@@ -57,9 +60,10 @@ function login(s :: Session, i :: Int)
   end
 
   try
-    getuuid(s)
+    sleep(2)
+    @info "UUID: $(getuuid(s))"
   catch e
-    Throw(ErrorException("Login failed"))
+    throw(ErrorException("Login failed"))
   end
 end
 
@@ -172,9 +176,19 @@ function register_all(s, s2, cfg)
   end
 end
 
-rwd = RemoteWebDriver(Capabilities("chrome"), host = "127.0.0.1", port = 4444)
-timeouts!(s, Timeouts(script = 50_000, pageLoad = 100_000, implicit = 5))
-sleep(1)
+function apply_all(s, s2, cfg)
+  for i=cfg["gmail_start"]:cfg["gmail_end"]
+    logout(s)
+    @info "Login and apply $i"
+    login(s, i)
+    apply(s)
+  end
+end
+
+rwd = RemoteWebDriver(Capabilities(
+  "chrome",
+  timeouts = Timeouts(script = 50_000, pageLoad = 100_000, implicit = 5_000)
+), host = "127.0.0.1", port = 4444)
 s = Session(rwd)
 s2 = Session(rwd)
 cfg = YAML.load_file("config.yml")
