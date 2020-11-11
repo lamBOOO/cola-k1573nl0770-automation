@@ -21,7 +21,7 @@ brew cask install chromedriver
 brew install selenium-server-standalone
 selenium-server -port 4444
 ## 2. Install Python Gmail API: https://developers.google.com/gmail/api/quickstart/python
-pip3 pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
+python3 -m pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
 ## 3. Create config from template
 cp config_example.yml config.yml
 ## 4. Insert your data into config.yml

@@ -49,10 +49,12 @@ function login(s :: Session, cfg, i :: Int)
   element_keys!(Element(s, "xpath", """//*[@id="signInEmailAddress"]"""), email)
   element_keys!(Element(s, "xpath", """//*[@id="currentPassword"]"""), pw)
   # click signin btn
+  sleep(1)
   click!(Element(s, "xpath", """//*[@id="ces-form-submit-ces-sign-in-form"]"""))
 
   # accept tos if not already done
-  sleep(2)
+  sleep(3)
+  # TODO ADAPTIVELY WAIT HERE
   try
     click!(Element(s, "xpath", """//*[@id="app"]/div/div[2]/div[2]/div[2]/div[2]/div[3]/button"""))
     @info "TOS accepted"
@@ -177,7 +179,7 @@ function activate(s, cfg, i)
   latest_msg = ""
   for count=1:30
     latest_msg = read(`python3 get-latest-inbox-gmail.py`, String)
-    print(latest_msg)
+    # print(latest_msg)
     if occursin(email, latest_msg) # latest email is correct one
       @info "Activation email arived"
       email_arrived = true
@@ -195,6 +197,7 @@ function activate(s, cfg, i)
   activation_link = "https://kistenlotto.cocacola.de/verification?verification_code=$(code)"
   @info activation_link
 
+  sleep(2)
   navigate!(s, activation_link)
 
   # try
@@ -231,7 +234,7 @@ function fullautomation(s, s2, cfg)
     @info "Register $i"
     register(s, s2, cfg, i)
 
-    @info "Activate $i $i"
+    @info "Activate $i"
     activate(s, cfg, i)
 
     @info "Login and apply $i"
