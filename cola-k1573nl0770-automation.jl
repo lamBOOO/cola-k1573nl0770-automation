@@ -144,7 +144,7 @@ function handle2Captcha(s, s2, cfg)
   # Check if submitted
   answer = element_text(Element(s2, "xpath", """/html/body"""))
   cap_id = match(r"OK\|(.*)", answer).captures[1]
-  @info cap_id
+  @info "Captcha ID $cap_id"
 
   receive_link = string("http://2captcha.com/res.php?key=", cfg["2captcha_userkey"], "&action=get&id=", cap_id)
   cap_solved = false
@@ -174,8 +174,10 @@ function activate(s, cfg, i)
 
   # wait for email to come
   email_arrived = false
+  latest_msg = ""
   for count=1:30
     latest_msg = read(`python3 get-latest-inbox-gmail.py`, String)
+    print(latest_msg)
     if occursin(email, latest_msg) # latest email is correct one
       @info "Activation email arived"
       email_arrived = true
@@ -191,6 +193,7 @@ function activate(s, cfg, i)
   code = replace(code, "3D" => "") # remove leading "3D"
 
   activation_link = "https://kistenlotto.cocacola.de/verification?verification_code=$(code)"
+  @info activation_link
 
   navigate!(s, activation_link)
 
@@ -221,6 +224,7 @@ function apply_all(s, s2, cfg)
 end
 
 function fullautomation(s, s2, cfg)
+  init_session(s)
   for i=cfg["gmail_start"]:cfg["gmail_end"]
     logout(s)
 
