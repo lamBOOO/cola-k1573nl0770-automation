@@ -33,19 +33,20 @@ function logout(s::Session)
   init_session(s)
 end
 
-function login(s :: Session, i :: Int)
+function login(s :: Session, cfg, i :: Int)
+  navigate!(s, "https://kistenlotto.cocacola.de")
   if loggedin(s)
     @info "Logout first"
     logout(s)
   end
-  user = email = string(cfg["gmail_id"], "+A$(lpad(i, 6, "0"))@gmail.com")
+  email = string(cfg["gmail_id"], "+A$(lpad(i, 6, "0"))@gmail.com")
   pw = cfg["pw"]
-  navigate!(s, "https://kistenlotto.cocacola.de")
+
   # click account btn
   click!(Element(s, "xpath", """//*[@id="app"]/div/div/div[1]/div[4]/div[1]/button"""))
   sleep(2)
   # input credentials
-  element_keys!(Element(s, "xpath", """//*[@id="signInEmailAddress"]"""), user)
+  element_keys!(Element(s, "xpath", """//*[@id="signInEmailAddress"]"""), email)
   element_keys!(Element(s, "xpath", """//*[@id="currentPassword"]"""), pw)
   # click signin btn
   click!(Element(s, "xpath", """//*[@id="ces-form-submit-ces-sign-in-form"]"""))
@@ -168,6 +169,40 @@ function handle2Captcha(s, s2, cfg)
   script!(s, "onCaptchaSubmit()")
 end
 
+function activate(s, cfg, i)
+  email = string(cfg["gmail_id"], "+A$(lpad(i, 6, "0"))@gmail.com")
+
+  # wait for email to come
+  email_arrived = false
+  for count=1:30
+    latest_msg = read(`python3 get-latest-inbox-gmail.py`, String)
+    if occursin(email, latest_msg) # latest email is correct one
+      @info "Activation email arived"
+      email_arrived = true
+      break
+    else
+      @info "Wait for activation mail"
+      sleep(2)
+    end
+  end
+  @assert email_arrived
+
+  code = match(r"verification_code=(\w*)", latest_msg).captures[1]
+  code = replace(code, "3D" => "") # remove leading "3D"
+
+  activation_link = "https://kistenlotto.cocacola.de/verification?verification_code=$(code)"
+
+  navigate!(s, activation_link)
+
+  # try
+  #   @info "Activation success"
+  #   login(s, cfg, i)
+  #   logout(s)
+  # catch e
+  #   throw(ErrorException("Activation failed"))
+  # end
+end
+
 function register_all(s, s2, cfg)
   for i=cfg["gmail_start"]:cfg["gmail_end"]
     logout(s)
@@ -180,7 +215,23 @@ function apply_all(s, s2, cfg)
   for i=cfg["gmail_start"]:cfg["gmail_end"]
     logout(s)
     @info "Login and apply $i"
-    login(s, i)
+    login(s, cfg, i)
+    apply(s)
+  end
+end
+
+function fullautomation(s, s2, cfg)
+  for i=cfg["gmail_start"]:cfg["gmail_end"]
+    logout(s)
+
+    @info "Register $i"
+    register(s, s2, cfg, i)
+
+    @info "Activate $i $i"
+    activate(s, cfg, i)
+
+    @info "Login and apply $i"
+    login(s, cfg, i)
     apply(s)
   end
 end
