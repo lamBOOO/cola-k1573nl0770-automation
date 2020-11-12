@@ -80,15 +80,26 @@ function getuuid(s)
   return uuid
 end
 
+"""
+TODO: Fix API calls
+curl 'https://kistenlotto.cocacola.de/api/v1/users/remaining-tries' \
+-H 'x-csrf-token: TODO' \
+-H 'content-type: application/json;charset=UTF-8' \
+-H 'referer: https://kistenlotto.cocacola.de/' \
+-H 'cookie: cratelottery=TODO' \
+--data-binary '{"uuid":"TODO"}'
+"""
 function remainding_tries(s::Session)
   uuid = getuuid(s)
   cmd = Cmd(["curl", "https://kistenlotto.cocacola.de/api/v1/users/remaining-tries", "-H", "content-type: application/json;charset=UTF-8", "--data-binary", "{\"uuid\":\"$uuid\"}"])
   response = JSON.parse(read(pipeline(cmd, stderr=Base.DevNull()), String))
+  @info "Response: $response"
   return response["data"]["remaining_tries"]
 end
 
 """
 After login, there should be an uuid in the local storage => get it.
+TODO: Fix API call
 """
 function apply(s::Session)
   # skip the clicking part and directly use API 🤯
@@ -229,21 +240,75 @@ function apply_all(s, s2, cfg)
 end
 
 function fullautomation(s, s2, cfg)
+  retries = 3
   init_session(s)
   for i=cfg["gmail_start"]:cfg["gmail_end"]
     @info now()
+    @info i
 
-    logout(s)
+    for j=1:retries
+      @info j
+      try
+        logout(s)
+        @info "Logout: OK"
+      catch e
+        if !isa(e, InterruptException)
+          @info "Logout: FAIL"
+        else
+          error("Interupt")
+        end
+      end
+      try
+        register(s, s2, cfg, i)
+        @info "Register: OK"
+      catch e
+        if !isa(e, InterruptException)
+          @info "Register: FAIL"
+        else
+          error("Interupt")
+        end
+      end
+      try
+        activate(s, cfg, i)
+        @info "Activate: OK"
+      catch e
+        if !isa(e, InterruptException)
+          @info "Activate: FAIL"
+        else
+          error("Interupt")
+        end
+      end
+      try
+        login(s, cfg, i)
+        @info "Login: OK"
+      catch e
+        if !isa(e, InterruptException)
+          @info "Login: FAIL"
+        else
+          error("Interupt")
+        end
+      end
+      try
+        apply(s)
+        @info "Apply: OK"
+      catch e
+        if !isa(e, InterruptException)
+          @info "Apply: FAIL"
+        else
+          error("Interupt")
+        end
+      end
 
-    @info "Register $i"
-    register(s, s2, cfg, i)
+      try
+        if remainding_tries(s) == 0
+          @info "SUCCES"
+          break
+        end
+      catch e
+        @warn "NO SUCCESS - RETRY"
+      end
 
-    @info "Activate $i"
-    activate(s, cfg, i)
-
-    @info "Login and apply $i"
-    login(s, cfg, i)
-    apply(s)
+    end
   end
 end
 
