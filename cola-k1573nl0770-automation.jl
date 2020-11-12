@@ -1,6 +1,7 @@
 using WebDriver
 using YAML
 using JSON
+using Dates
 
 function init_session(s :: Session)
   navigate!(s, "https://kistenlotto.cocacola.de")
@@ -199,6 +200,7 @@ function activate(s, cfg, i)
 
   sleep(2)
   navigate!(s, activation_link)
+  sleep(2)
 
   # try
   #   @info "Activation success"
@@ -229,6 +231,8 @@ end
 function fullautomation(s, s2, cfg)
   init_session(s)
   for i=cfg["gmail_start"]:cfg["gmail_end"]
+    @info now()
+
     logout(s)
 
     @info "Register $i"
