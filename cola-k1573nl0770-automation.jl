@@ -2,6 +2,8 @@ using WebDriver
 using YAML
 using JSON
 using Dates
+using Gumbo
+using Cascadia
 
 function init_session(s :: Session)
   navigate!(s, "https://kistenlotto.cocacola.de")
@@ -80,42 +82,106 @@ function getuuid(s)
   return uuid
 end
 
-"""
-TODO: Fix API calls
-curl 'https://kistenlotto.cocacola.de/api/v1/users/remaining-tries' \
--H 'x-csrf-token: TODO' \
--H 'content-type: application/json;charset=UTF-8' \
--H 'referer: https://kistenlotto.cocacola.de/' \
--H 'cookie: cratelottery=TODO' \
---data-binary '{"uuid":"TODO"}'
-"""
-function remainding_tries(s::Session)
-  uuid = getuuid(s)
-  cmd = Cmd(["curl", "https://kistenlotto.cocacola.de/api/v1/users/remaining-tries", "-H", "content-type: application/json;charset=UTF-8", "--data-binary", "{\"uuid\":\"$uuid\"}"])
-  response = JSON.parse(read(pipeline(cmd, stderr=Base.DevNull()), String))
-  @info "Response: $response"
-  return response["data"]["remaining_tries"]
+function getcsrftoken(s)
+  html = parsehtml(source(s))
+  csrftoken = eachmatch(Selector("head > meta:nth-child(4)"), html.root)[1].attributes["content"]
+  return csrftoken
+end
+
+function cratelottery_cookie(s)
+  cratelottery = cookie(s, "cratelottery").value
+end
+
+function xsrftoken_cookie(s)
+  cratelottery = cookie(s, "XSRF-TOKEN").value
 end
 
 """
-After login, there should be an uuid in the local storage => get it.
-TODO: Fix API call
+TODO: Fix API calls
 """
-function apply(s::Session)
+function remainding_tries(s::Session)
+  uuid = getuuid(s)
+
+  cmd = Cmd([
+    "curl", "https://kistenlotto.cocacola.de/api/v1/users/remaining-tries",
+    "-H", "x-csrf-token: $(getcsrftoken(s))",
+    "-H", "content-type: application/json;charset=UTF-8",
+    "-H", "referer: https://kistenlotto.cocacola.de/",
+    "-H", "cookie: cratelottery=$(cratelottery_cookie(s))",
+    "--data-binary", "{\"uuid\":\"$uuid\"}"
+  ])
+  response = JSON.parse(read(pipeline(cmd, stderr=Base.DevNull()), String))
+  @debug "Response: $response"
+  return response["data"]["remaining_tries"]
+end
+
+function apply(s)
+  for i=1:remainding_tries(s)
+    @info "Apply number  $i"
+    apply_once(s)
+  end
+end
+
+function apply_once(s::Session)
+  navigate!(s, "https://kistenlotto.cocacola.de")
+
+  # apply btn
+  click!(Element(s, "xpath", """//*[@id="app"]/div/div/main/div/div/div/div[2]/div/button"""))
+
+  # image input field
+  im_field = Element(s, "xpath", """//*[@id="img-file"]""")
+  element_keys!(im_field, joinpath(pwd(), cfg["cola_crate_image"]))
+
+  # use image btn
+  click!(Element(s, "xpath", """//*[@id="app"]/div/div/main/div/div/div/div/div/div/div/div[3]/div[2]/button"""))
+
+  # wait for analysis
+  analysis_done = false
+  print("Analysis")
+  for i=1:20
+    answer_el = Element(s, "xpath", """//*[@id="app"]/div/div/main/div/div/div/div/div/div""")
+    if occursin("UND JETZT GUT MISCHEN!", element_text(answer_el))
+      @info "Analysis done"
+      analysis_done = true
+      break
+    else
+      print(".")
+      sleep(3)
+    end
+  end
+  @assert analysis_done
+
+  # use api to apply
+  apply_api(s)
+
+end
+
+"""
+Only works when image is already analyzed
+"""
+function apply_api(s::Session)
   # skip the clicking part and directly use API 🤯
+  tries_avail = remainding_tries(s)
   uuid = getuuid(s)
   options = ["coke_red", "coke_zero", "coke_zero_coffeine", "coke_vanilla", "coke_cherry", "coke_light", "coke_light_no_coffeine", "coke_light_lemon", "fanta", "fanta_light", "fanta_red", "fanta_green", "fanta_lemon", "mezzomix", "mezzomix_zero", "sprite", "sprite_zero", "lift"]
-  tries = remainding_tries(s)
-  @info "Try to apply $tries times"
-  for i=1:tries
-    @info "Apply $i"
+
+  if tries_avail > 0
     rdm_crate = [rand(options) for i=1:12]
-    @info "Use crate: $rdm_crate"
-    cmd = Cmd(["curl", "https://kistenlotto.cocacola.de/api/v1/users/submit-crate", "-H", "content-type: application/json;charset=UTF-8", "--data-binary", "{\"retailer\":\"rewe\",\"uuid\":\"$uuid\",\"crate\":$rdm_crate}"])
+    @info "Apply with crate: $rdm_crate"
+    cmd = Cmd([
+      "curl", "https://kistenlotto.cocacola.de/api/v1/users/submit-crate",
+      "-H", "x-csrf-token: $(getcsrftoken(s))",
+      "-H", "content-type: application/json;charset=UTF-8",
+      "-H", "referer: https://kistenlotto.cocacola.de/mitmachen/haendler",
+      "-H", "cookie: cookie: XSRF-TOKEN=$(xsrftoken_cookie(s));cratelottery=$(cratelottery_cookie(s));cratelottery=$(cratelottery_cookie(s))",
+      "--data-binary", "{\"retailer\":\"rewe\",\"uuid\":\"$uuid\",\"crate\":$rdm_crate, \"imageUploads\":[{\"attempt\":1,\"success\":true}]}"
+    ])
     response = JSON.parse(read(pipeline(cmd, stderr=Base.DevNull()), String))
-    @info "Response: $response"
+    @debug "Response: $response"
+    @info response["data"]["message"]
   end
-  @assert remainding_tries(s) == 0
+
+  @assert remainding_tries(s) == tries_avail-1
 end
 
 function register(s :: Session, s2 :: Session, cfg, i)
@@ -163,12 +229,13 @@ function handle2Captcha(s, s2, cfg)
   receive_link = string("http://2captcha.com/res.php?key=", cfg["2captcha_userkey"], "&action=get&id=", cap_id)
   cap_solved = false
   cap_response = nothing
+  print("Captcha")
   while !cap_solved
     navigate!(s2, receive_link)
     answer = element_text(Element(s2, "xpath", """/html/body"""))
     @debug answer
     if answer=="CAPCHA_NOT_READY"
-      @info "Captcha wait"
+      print(".")
       sleep(10)
     else
       @info "Captcha done"
@@ -189,6 +256,7 @@ function activate(s, cfg, i)
   # wait for email to come
   email_arrived = false
   latest_msg = ""
+  print("Activation mail")
   for count=1:30
     latest_msg = read(`python3 get-latest-inbox-gmail.py`, String)
     # print(latest_msg)
@@ -197,7 +265,7 @@ function activate(s, cfg, i)
       email_arrived = true
       break
     else
-      @info "Wait for activation mail"
+      print(".")
       sleep(2)
     end
   end
@@ -212,14 +280,6 @@ function activate(s, cfg, i)
   sleep(2)
   navigate!(s, activation_link)
   sleep(2)
-
-  # try
-  #   @info "Activation success"
-  #   login(s, cfg, i)
-  #   logout(s)
-  # catch e
-  #   throw(ErrorException("Activation failed"))
-  # end
 end
 
 function register_all(s, s2, cfg)
@@ -240,62 +300,85 @@ function apply_all(s, s2, cfg)
 end
 
 function fullautomation(s, s2, cfg)
-  retries = 3
+  retries = 10
   init_session(s)
   for i=cfg["gmail_start"]:cfg["gmail_end"]
     @info now()
-    @info i
+    @info "Account number $i"
+
+    register_ok = false
+    activate_ok = false
+    apply_ok = false
 
     for j=1:retries
-      @info j
+      @info "Try number $j"
+
       try
         logout(s)
         @info "Logout: OK"
       catch e
         if !isa(e, InterruptException)
           @info "Logout: FAIL"
+          print(e)
         else
           error("Interupt")
         end
       end
-      try
-        register(s, s2, cfg, i)
-        @info "Register: OK"
-      catch e
-        if !isa(e, InterruptException)
-          @info "Register: FAIL"
-        else
-          error("Interupt")
+
+      if !register_ok
+        try
+          register(s, s2, cfg, i)
+          @info "Register: OK"
+          register_ok = true
+        catch e
+          if !isa(e, InterruptException)
+            @info "Register: FAIL"
+            print(e)
+          else
+            error("Interupt")
+          end
         end
       end
-      try
-        activate(s, cfg, i)
-        @info "Activate: OK"
-      catch e
-        if !isa(e, InterruptException)
-          @info "Activate: FAIL"
-        else
-          error("Interupt")
+
+      if !activate_ok
+        try
+          activate(s, cfg, i)
+          @info "Activate: OK"
+          activate_ok = true
+        catch e
+          if !isa(e, InterruptException)
+            @info "Activate: FAIL"
+            print(e)
+          else
+            error("Interupt")
+          end
         end
       end
+
       try
         login(s, cfg, i)
         @info "Login: OK"
       catch e
         if !isa(e, InterruptException)
           @info "Login: FAIL"
+          print(e)
         else
           error("Interupt")
         end
       end
-      try
-        apply(s)
-        @info "Apply: OK"
-      catch e
-        if !isa(e, InterruptException)
-          @info "Apply: FAIL"
-        else
-          error("Interupt")
+
+      if !apply_ok
+        try
+          apply(s)
+          @info "Apply: OK"
+          apply_ok = true
+        catch e
+          if !isa(e, InterruptException)
+            @info "Apply: FAIL"
+            print(e)
+          else
+            error("Interupt")
+          end
         end
       end
 
