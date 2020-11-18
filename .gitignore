@@ -2,3 +2,5 @@ config.yml
 credentials.json
 token.pickle
 image.jpg
+mails/*
+data.xlsx
