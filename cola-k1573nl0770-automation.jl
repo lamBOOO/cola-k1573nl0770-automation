@@ -7,14 +7,6 @@ using Cascadia
 
 function init_session(s :: Session)
   navigate!(s, "https://kistenlotto.cocacola.de")
-  try
-    sleep(2)
-    cookie_btn = Element(s, "xpath", """//*[@id="onetrust-accept-btn-handler"]""")
-    click!(cookie_btn)
-    @info "Cookies accepted"
-  catch e
-    @info "Cookies already accepted"
-  end
 end
 
 function loggedin(s :: Session)
@@ -37,11 +29,7 @@ function logout(s::Session)
 end
 
 function login(s :: Session, cfg, i :: Int)
-  navigate!(s, "https://kistenlotto.cocacola.de")
-  if loggedin(s)
-    @info "Logout first"
-    logout(s)
-  end
+  logout(s)
   email = string(cfg["gmail_id"], "+A$(lpad(i, 6, "0"))@gmail.com")
   pw = cfg["pw"]
 
@@ -117,7 +105,7 @@ end
 
 function apply(s)
   for i=1:remainding_tries(s)
-    @info "Apply number  $i"
+    @info "Apply number $i"
     apply_once(s)
   end
 end
@@ -157,7 +145,8 @@ function apply_once(s::Session)
 end
 
 """
-Only works when image is already analyzed
+Only works when image is already analyzed.
+FIXME: Needs recaptcha solve
 """
 function apply_api(s::Session)
   # skip the clicking part and directly use API 🤯
@@ -173,11 +162,11 @@ function apply_api(s::Session)
       "-H", "x-csrf-token: $(getcsrftoken(s))",
       "-H", "content-type: application/json;charset=UTF-8",
       "-H", "referer: https://kistenlotto.cocacola.de/mitmachen/haendler",
-      "-H", "cookie: cookie: XSRF-TOKEN=$(xsrftoken_cookie(s));cratelottery=$(cratelottery_cookie(s));cratelottery=$(cratelottery_cookie(s))",
+      "-H", "cookie: cookie: XSRF-TOKEN=$(xsrftoken_cookie(s));cratelottery=$(cratelottery_cookie(s))",
       "--data-binary", "{\"retailer\":\"rewe\",\"uuid\":\"$uuid\",\"crate\":$rdm_crate, \"imageUploads\":[{\"attempt\":1,\"success\":true}]}"
     ])
     response = JSON.parse(read(pipeline(cmd, stderr=Base.DevNull()), String))
-    @debug "Response: $response"
+    @info "Response: $response"
     @info response["data"]["message"]
   end
 
@@ -290,9 +279,9 @@ function register_all(s, s2, cfg)
   end
 end
 
-function apply_all(s, s2, cfg)
+function apply_all(s, cfg)
+  init_session(s)
   for i=cfg["gmail_start"]:cfg["gmail_end"]
-    logout(s)
     @info "Login and apply $i"
     login(s, cfg, i)
     apply(s)
